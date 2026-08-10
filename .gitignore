@@ -19,3 +19,4 @@ last_scan.txt
 # Local archive of previous development versions
 # These files are kept locally and are not part of the project
 archive/
+mDNS-NetworkScanner-Mapping.json

@@ -53,6 +53,7 @@ import time
 import ctypes
 import threading
 import csv
+from collections import Counter
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
@@ -307,8 +308,25 @@ def parse_custom_range(user_input):
 # Hostname, NetBIOS, Live Vendor & Smart Fallback Engine
 # ============================================================
 
+def get_scapy_netbios(ip):
+    """Fallback NetBIOS name query using Scapy packet crafting."""
+    try:
+        pkt = scapy.IP(dst=str(ip)) / scapy.UDP(sport=137, dport=137) / scapy.NBNSQueryRequest(SUFFIX="status", QUESTION_NAME="*")
+        ans, _ = scapy.sr(pkt, timeout=1, verbose=False)
+        for _, r in ans:
+            if r.haslayer(scapy.NBNSQueryResponse):
+                names = r[scapy.NBNSQueryResponse].ADDR_ENTRY
+                for n in names:
+                    name = n.RR_NAME.decode('ascii', errors='ignore').strip()
+                    if name and not name.startswith("WORKGROUP"):
+                        return name
+    except Exception:
+        pass
+    return None
+
+
 def get_netbios_name(ip):
-    """Attempts NetBIOS hostname lookup using Windows nbtstat."""
+    """Attempts NetBIOS hostname lookup using nbtstat with Scapy fallback."""
     try:
         result = subprocess.run(
             ["nbtstat", "-A", str(ip)],
@@ -333,7 +351,8 @@ def get_netbios_name(ip):
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError):
         pass
 
-    return None
+    # Restored Fallback
+    return get_scapy_netbios(ip)
 
 
 def resolve_host_info(ip, cancel_event=None):
@@ -616,7 +635,17 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
     combined_arp = {**system_arp, **direct_arp_hits}
     subnet_arp = {ip: mac for ip, mac in combined_arp.items() if ip in hosts_set}
 
+    # RESTORED: Shared MAC / Proxy Analysis
     gateway_mac = get_default_gateway_mac()
+    mac_counts = Counter(subnet_arp.values())
+    proxy_macs = set()
+    
+    if gateway_mac:
+        proxy_macs.add(gateway_mac)
+        
+    for mac, count in mac_counts.items():
+        if count >= 3:
+            proxy_macs.add(mac)
 
     # 3. Optional Active mDNS Sweep
     mdns_devices = {}
@@ -628,18 +657,18 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
     if cancel_event and cancel_event.is_set():
         return {}
 
-    candidate_ips = sorted(
-        list(set(ping_hits) | set(subnet_arp.keys()) | set(mdns_devices.keys())),
+    raw_candidates = sorted(
+        list(set(subnet_arp.keys()) | set(mdns_devices.keys()) | set(direct_arp_hits.keys())),
         key=ipaddress.ip_address
     )
 
     # 4. Hostname & NetBIOS Resolution
     if status_callback:
-        status_callback(f"Scanning [Phase 4/5]: Resolving hostnames for {len(candidate_ips)} active host(s)...")
+        status_callback(f"Scanning [Phase 4/5]: Resolving hostnames for {len(raw_candidates)} candidate(s)...")
 
     resolved_hostnames = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=HOSTNAME_WORKERS) as executor:
-        futures = {executor.submit(resolve_host_info, ip, cancel_event): ip for ip in candidate_ips}
+        futures = {executor.submit(resolve_host_info, ip, cancel_event): ip for ip in raw_candidates}
         for future in concurrent.futures.as_completed(futures):
             if cancel_event and cancel_event.is_set():
                 break
@@ -654,13 +683,29 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
     if cancel_event and cancel_event.is_set():
         return {}
 
-    # 5. TCP Port Scanning
+    # RESTORED: Ghost Filtering BEFORE Port Scanning
+    active_target_ips = []
+    for ip in raw_candidates:
+        mac = subnet_arp.get(ip, "")
+        is_proxy = mac in proxy_macs
+        has_mdns = ip in mdns_devices
+        has_hostname = ip in resolved_hostnames
+        has_direct_arp = ip in direct_arp_hits
+
+        # Proxy IPs require independent proof (mDNS, DNS/NetBIOS, or Direct ARP hit)
+        if is_proxy:
+            if has_mdns or has_hostname or has_direct_arp:
+                active_target_ips.append(ip)
+        else:
+            active_target_ips.append(ip)
+
+    # 5. TCP Port Scanning (Only Executed Against Validated Targets)
     if status_callback:
-        status_callback(f"Scanning [Phase 5/5]: Auditing TCP ports for active host(s)...")
+        status_callback(f"Scanning [Phase 5/5]: Auditing TCP ports for {len(active_target_ips)} real host(s)...")
 
     scanned_ports = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=PORT_SCAN_WORKERS) as executor:
-        futures = {executor.submit(scan_open_ports, ip, cancel_event): ip for ip in candidate_ips}
+        futures = {executor.submit(scan_open_ports, ip, cancel_event): ip for ip in active_target_ips}
         for future in concurrent.futures.as_completed(futures):
             if cancel_event and cancel_event.is_set():
                 break
@@ -673,16 +718,16 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
     if cancel_event and cancel_event.is_set():
         return {}
 
-    # Consolidate Discovery Data and auto-fetch saved MAC notes
+    # Consolidate Discovery Data
     devices = {}
-    for ip in candidate_ips:
+    for ip in active_target_ips:
         mac = subnet_arp.get(ip, "")
         dns_netbios_name = resolved_hostnames.get(ip, "")
         mdns_name = mdns_devices.get(ip, {}).get("hostname", "")
         open_ports = scanned_ports.get(ip, "None")
 
         hostname = mdns_name or dns_netbios_name
-        is_proxy_mac = (mac == gateway_mac and gateway_mac is not None)
+        is_proxy_mac = mac in proxy_macs
 
         real_mac = mac if not is_proxy_mac else ""
         vendor = get_vendor_by_mac(real_mac)
@@ -709,9 +754,15 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
 
         saved_note = lookup_saved_note(real_mac, ip)
 
+        # Determine vendor string format
+        if is_proxy_mac:
+            vendor_label = f"Gateway/Proxy [{vendor if vendor else 'Unknown Vendor'}]"
+        else:
+            vendor_label = vendor if vendor else "Unknown Vendor"
+
         devices[ip] = {
             "mac": mac if mac else "N/A",
-            "vendor": vendor if vendor else ("Gateway/Proxy" if is_proxy_mac else "Unknown Vendor"),
+            "vendor": vendor_label,
             "hostname": hostname,
             "method": " + ".join(methods) if methods else "Active Probe",
             "ports": open_ports,
@@ -724,6 +775,30 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
 # ============================================================
 # Graphical User Interface (Tkinter)
 # ============================================================
+class TreeviewTooltip:
+    """Displays a hover tooltip over Treeview cells."""
+    def __init__(self, tree):
+        self.tree = tree
+        self.tip_window = None
+
+    def show_tip(self, text, x, y):
+        if self.tip_window or not text:
+            return
+        self.tip_window = tw = tk.Toplevel(self.tree)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x+15}+{y+15}")
+        label = tk.Label(
+            tw, text=text, justify=tk.LEFT,
+            background="#FFFFE1", relief=tk.SOLID, borderwidth=1,
+            font=("Segoe UI", 8, "normal"), padx=4, pady=2
+        )
+        label.pack()
+
+    def hide_tip(self):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
 
 class NetworkScannerGUI:
     def __init__(self, root):
@@ -739,6 +814,59 @@ class NetworkScannerGUI:
 
         self.setup_styles()
         self.create_widgets()
+
+        # Bind double click for editing notes
+        self.tree.bind("<Double-1>", self.on_double_click)
+
+        # --- ADD THESE THREE LINES ---
+        self.tooltip = TreeviewTooltip(self.tree)
+        self.tree.bind("<Motion>", self.on_tree_hover)
+        self.tree.bind("<Button-3>", self.show_context_menu)
+        # -----------------------------
+
+    def on_tree_hover(self, event):
+        """Shows a hover tooltip on treeview rows."""
+        item_id = self.tree.identify_row(event.y)
+        if item_id:
+            x = self.root.winfo_pointerx()
+            y = self.root.winfo_pointery()
+            self.tooltip.show_tip("💡 Right-click row/cell to copy to clipboard", x, y)
+        else:
+            self.tooltip.hide_tip()
+
+    def show_context_menu(self, event):
+        """Creates a right-click context menu to copy selected row/cell data."""
+        item_id = self.tree.identify_row(event.y)
+        column_id = self.tree.identify_column(event.x)
+        
+        if not item_id:
+            return
+
+        self.tree.selection_set(item_id)
+        values = self.tree.item(item_id, "values")
+        
+        # Determine column index clicked (e.g., '#1' -> 0)
+        col_index = int(column_id.replace("#", "")) - 1 if column_id else 0
+        cell_value = values[col_index] if 0 <= col_index < len(values) else ""
+
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(
+            label=f"Copy Cell ('{cell_value[:20]}...')", 
+            command=lambda: self.copy_to_clipboard(cell_value)
+        )
+        menu.add_command(
+            label="Copy Entire Row (CSV Format)", 
+            command=lambda: self.copy_to_clipboard(", ".join(f'"{v}"' for v in values))
+        )
+        menu.post(event.x_root, event.y_root)
+
+    def copy_to_clipboard(self, text):
+        """Copies text to the system clipboard."""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.root.update()
+        self.set_status(f"Copied to clipboard: '{text}'", status_type="ready")
+
 
     def setup_styles(self):
         self.style = ttk.Style()
@@ -868,12 +996,8 @@ class NetworkScannerGUI:
 
     def set_status(self, text, status_type="running"):
         """
-        Updates the status bar text and background color.
-        status_type:
-          - "running": Orange (#E65100)
-          - "stopping": Amber (#D97706)
-          - "stopped": Crimson Red (#B91C1C)
-          - "ready": Green (#2E7D32)
+        Updates status bar background and text.
+        status_type: "running", "stopping", "stopped", "ready"
         """
         color_map = {
             "running": "#E65100",
@@ -895,7 +1019,7 @@ class NetworkScannerGUI:
             self.custom_entry.config(state="disabled")
 
     def stop_scan(self):
-        """Triggers the cancellation event and updates status indicator."""
+        """Triggers cancellation event and updates status indicator."""
         if self.is_scan_running:
             self.cancel_event.set()
             self.stop_btn.config(state="disabled")
@@ -986,7 +1110,6 @@ class NetworkScannerGUI:
         query = self.filter_query_var.get().strip().lower()
         field_target = self.filter_field_var.get()
 
-        # Clear active table rows
         for item in self.tree.get_children():
             self.tree.delete(item)
 
