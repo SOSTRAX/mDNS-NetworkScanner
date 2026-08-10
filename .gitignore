@@ -1,0 +1,21 @@
+# Python bytecode and cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Log files
+*.log
+
+# Network Scanner runtime data
+# Stores the IP range used by the previous scan
+last_scan.txt
+
+# Local archive of previous development versions
+# These files are kept locally and are not part of the project
+archive/
