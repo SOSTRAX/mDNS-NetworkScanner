@@ -1,9 +1,16 @@
 import ipaddress
+import json
+import os
 import socket
 import subprocess
+import sys
 import concurrent.futures
+import queue
 import re
+import threading
 import time
+import tkinter as tk
+from tkinter import messagebox, ttk
 
 from zeroconf import ServiceBrowser, Zeroconf
 
@@ -28,6 +35,38 @@ MDNS_SERVICE_DISCOVERY_TIME = 10
 # How long to browse the discovered mDNS services.
 
 MDNS_DEVICE_DISCOVERY_TIME = 10
+
+# Where per-device notes entered in the GUI are stored.
+
+NOTES_FILE = os.path.join(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    ),
+    "device_notes.json"
+)
+
+
+# ============================================================
+# Progress reporting
+# ============================================================
+
+def console_progress(text, transient=False):
+    """Default progress reporter used by the console interface."""
+
+    if transient:
+        print(f"\r{text}", end="", flush=True)
+    else:
+        print(text)
+
+
+def interruptible_sleep(seconds, cancel_event=None):
+    """Sleep, but return early when a cancel event is set."""
+
+    if cancel_event is None:
+        time.sleep(seconds)
+        return
+
+    cancel_event.wait(seconds)
 
 
 # ============================================================
@@ -254,7 +293,11 @@ def get_arp_table():
 # mDNS discovery
 # ============================================================
 
-def mdns_discover(hosts_set):
+def mdns_discover(
+    hosts_set,
+    progress=None,
+    cancel_event=None
+):
     """
     Discover mDNS devices without knowing their hostnames.
 
@@ -269,8 +312,10 @@ def mdns_discover(hosts_set):
     hosts_set contains string IP addresses from the scan range.
     """
 
-    print("mDNS discovery:")
-    print("  Discovering advertised service types...")
+    report = progress or console_progress
+
+    report("mDNS discovery:")
+    report("  Discovering advertised service types...")
 
     service_types = set()
 
@@ -305,8 +350,9 @@ def mdns_discover(hosts_set):
 
     try:
 
-        time.sleep(
-            MDNS_SERVICE_DISCOVERY_TIME
+        interruptible_sleep(
+            MDNS_SERVICE_DISCOVERY_TIME,
+            cancel_event
         )
 
     except KeyboardInterrupt:
@@ -317,7 +363,12 @@ def mdns_discover(hosts_set):
 
     service_browser.cancel()
 
-    print(
+    if cancel_event is not None and cancel_event.is_set():
+
+        zeroconf.close()
+        return {}
+
+    report(
         f"  {len(service_types)} "
         f"service types found"
     )
@@ -326,7 +377,7 @@ def mdns_discover(hosts_set):
 
         zeroconf.close()
 
-        print(
+        report(
             "  No mDNS service types found."
         )
 
@@ -336,7 +387,7 @@ def mdns_discover(hosts_set):
     # Stage 2 - Browse all discovered service types
     # ========================================================
 
-    print(
+    report(
         "  Browsing discovered mDNS services..."
     )
 
@@ -435,8 +486,9 @@ def mdns_discover(hosts_set):
     # found mx-test.local used 10 seconds.
     try:
 
-        time.sleep(
-            MDNS_DEVICE_DISCOVERY_TIME
+        interruptible_sleep(
+            MDNS_DEVICE_DISCOVERY_TIME,
+            cancel_event
         )
 
     except KeyboardInterrupt:
@@ -457,7 +509,7 @@ def mdns_discover(hosts_set):
     # Diagnostic information
     # ========================================================
 
-    print(
+    report(
         f"  {len(all_mdns_devices)} "
         f"mDNS devices discovered"
     )
@@ -474,7 +526,7 @@ def mdns_discover(hosts_set):
 
             mdns_devices[ip] = mdns_info
 
-    print(
+    report(
         f"  {len(mdns_devices)} "
         f"mDNS devices found in scan range"
     )
@@ -489,8 +541,8 @@ def mdns_discover(hosts_set):
 
     if all_mdns_devices:
 
-        print()
-        print("  All mDNS devices discovered:")
+        report("")
+        report("  All mDNS devices discovered:")
 
         for ip in sorted(
             all_mdns_devices,
@@ -504,12 +556,12 @@ def mdns_discover(hosts_set):
                 "hostname"
             ]
 
-            print(
+            report(
                 f"    {ip:<17} "
                 f"{hostname}"
             )
 
-        print()
+        report("")
 
     return mdns_devices
 
@@ -520,8 +572,18 @@ def mdns_discover(hosts_set):
 
 def scan_network(
     hosts,
-    discovery_mode="fast"
+    discovery_mode="fast",
+    progress=None,
+    cancel_event=None
 ):
+
+    report = progress or console_progress
+
+    def cancelled():
+        return (
+            cancel_event is not None
+            and cancel_event.is_set()
+        )
 
     hosts = list(hosts)
 
@@ -539,8 +601,8 @@ def scan_network(
     # Ping scan
     # --------------------------------------------------------
 
-    print()
-    print(
+    report("")
+    report(
         f"Ping scan using {MAX_WORKERS} "
         f"simultaneous workers:"
     )
@@ -563,6 +625,15 @@ def scan_network(
                 futures
             ):
 
+                if cancelled():
+
+                    executor.shutdown(
+                        wait=False,
+                        cancel_futures=True
+                    )
+
+                    return devices
+
                 ip = futures[future]
 
                 completed += 1
@@ -584,19 +655,18 @@ def scan_network(
                     completed / total
                 ) * 100
 
-                print(
-                    f"\r  {completed}/{total} "
+                report(
+                    f"  {completed}/{total} "
                     f"({percentage:5.1f}%) "
                     f"addresses scanned",
-                    end="",
-                    flush=True
+                    True
                 )
 
         except KeyboardInterrupt:
 
-            print()
-            print()
-            print(
+            report("")
+            report("")
+            report(
                 "Scan cancelled by user."
             )
 
@@ -607,15 +677,18 @@ def scan_network(
 
             return devices
 
-    print()
-    print()
+    report("")
+    report("")
+
+    if cancelled():
+        return devices
 
     # --------------------------------------------------------
     # ARP discovery
     # --------------------------------------------------------
 
-    print("ARP discovery:")
-    print(
+    report("ARP discovery:")
+    report(
         "  Reading Windows ARP table..."
     )
 
@@ -627,7 +700,7 @@ def scan_network(
         if ip in hosts_set
     }
 
-    print(
+    report(
         f"  {len(filtered_arp)} "
         f"ARP entries found"
     )
@@ -656,16 +729,18 @@ def scan_network(
             completed_arp / total_arp
         ) * 100 if total_arp else 100
 
-        print(
-            f"\r  Processing ARP entries: "
+        report(
+            f"  Processing ARP entries: "
             f"{completed_arp}/{total_arp} "
             f"({percentage:5.1f}%)",
-            end="",
-            flush=True
+            True
         )
 
-    print()
-    print()
+    report("")
+    report("")
+
+    if cancelled():
+        return devices
 
     # --------------------------------------------------------
     # mDNS discovery
@@ -676,7 +751,9 @@ def scan_network(
         try:
 
             mdns_devices = mdns_discover(
-                hosts_set
+                hosts_set,
+                progress,
+                cancel_event
             )
 
             # ----------------------------------------------
@@ -721,21 +798,24 @@ def scan_network(
 
         except KeyboardInterrupt:
 
-            print()
-            print()
-            print(
+            report("")
+            report("")
+            report(
                 "mDNS discovery "
                 "cancelled by user."
             )
 
-        print()
-        print()
+        report("")
+        report("")
+
+    if cancelled():
+        return devices
 
     # --------------------------------------------------------
     # Hostname discovery
     # --------------------------------------------------------
 
-    print("Hostname discovery:")
+    report("Hostname discovery:")
 
     hostname_targets = list(
         devices.keys()
@@ -783,6 +863,15 @@ def scan_network(
                         futures
                     ):
 
+                        if cancelled():
+
+                            executor.shutdown(
+                                wait=False,
+                                cancel_futures=True
+                            )
+
+                            return devices
+
                         ip = futures[future]
 
                         completed_hostnames += 1
@@ -805,33 +894,32 @@ def scan_network(
                             / total_dns_lookups
                         ) * 100
 
-                        print(
-                            f"\r  Resolving hostnames: "
+                        report(
+                            f"  Resolving hostnames: "
                             f"{completed_hostnames}/"
                             f"{total_dns_lookups} "
                             f"({percentage:5.1f}%)",
-                            end="",
-                            flush=True
+                            True
                         )
 
                 except KeyboardInterrupt:
 
-                    print()
-                    print()
-                    print(
+                    report("")
+                    report("")
+                    report(
                         "Hostname discovery "
                         "cancelled by user."
                     )
 
             else:
 
-                print(
+                report(
                     "  All devices already have "
                     "hostnames."
                 )
 
-    print()
-    print()
+    report("")
+    report("")
 
     # --------------------------------------------------------
     # Return results
@@ -950,6 +1038,552 @@ def parse_scan_range(text):
     return [
         ipaddress.ip_address(text)
     ]
+
+
+# ============================================================
+# Notes storage
+# ============================================================
+
+def note_key(ip, mac):
+    """
+    Key used to remember a note.
+
+    A MAC address follows a device even when DHCP gives it
+    a different address, so it is preferred over the IP.
+    """
+
+    if mac:
+        return f"mac:{mac}"
+
+    return f"ip:{ip}"
+
+
+def load_notes():
+
+    try:
+
+        with open(
+            NOTES_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            notes = json.load(file)
+
+    except (OSError, ValueError):
+
+        return {}
+
+    if not isinstance(notes, dict):
+        return {}
+
+    return {
+        str(key): str(value)
+        for key, value in notes.items()
+    }
+
+
+def save_notes(notes):
+
+    try:
+
+        with open(
+            NOTES_FILE,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                notes,
+                file,
+                indent=2,
+                sort_keys=True
+            )
+
+    except OSError:
+
+        pass
+
+
+# ============================================================
+# Graphical interface
+# ============================================================
+
+COLUMNS = (
+    ("ip", "IP Address", 130),
+    ("hostname", "Hostname", 260),
+    ("mac", "MAC Address", 150),
+    ("method", "Discovery", 160),
+    ("note", "Note", 300)
+)
+
+
+class ScannerWindow:
+    """Tkinter front end for the network scanner."""
+
+    def __init__(self, root):
+
+        self.root = root
+        self.root.title("Network Scanner")
+        self.root.geometry("1080x640")
+
+        self.networks = get_network_adapters()
+        self.notes = load_notes()
+
+        self.messages = queue.Queue()
+        self.cancel_event = None
+        self.scan_thread = None
+        self.note_editor = None
+
+        self._build_controls()
+        self._build_table()
+        self._build_status()
+
+        self.root.protocol(
+            "WM_DELETE_WINDOW",
+            self.on_close
+        )
+
+        self.root.after(100, self._drain_messages)
+
+    # --------------------------------------------------------
+    # Layout
+    # --------------------------------------------------------
+
+    def _build_controls(self):
+
+        frame = ttk.Frame(self.root, padding=10)
+        frame.pack(fill="x")
+
+        ttk.Label(
+            frame,
+            text="Network:"
+        ).grid(row=0, column=0, sticky="w")
+
+        self.network_choice = ttk.Combobox(
+            frame,
+            state="readonly",
+            width=55,
+            values=[
+                f"{', '.join(item['adapters'])} "
+                f"({item['network']})"
+                for item in self.networks
+            ]
+        )
+
+        self.network_choice.grid(
+            row=0,
+            column=1,
+            sticky="w",
+            padx=(6, 20)
+        )
+
+        if self.networks:
+            self.network_choice.current(0)
+
+        self.network_choice.bind(
+            "<<ComboboxSelected>>",
+            self._on_network_selected
+        )
+
+        ttk.Label(
+            frame,
+            text="Range:"
+        ).grid(row=0, column=2, sticky="w")
+
+        self.range_value = tk.StringVar()
+
+        ttk.Entry(
+            frame,
+            textvariable=self.range_value,
+            width=28
+        ).grid(
+            row=0,
+            column=3,
+            sticky="w",
+            padx=(6, 20)
+        )
+
+        self.mode_value = tk.StringVar(value="fast")
+
+        ttk.Radiobutton(
+            frame,
+            text="Fast",
+            value="fast",
+            variable=self.mode_value
+        ).grid(row=0, column=4, sticky="w")
+
+        ttk.Radiobutton(
+            frame,
+            text="Thorough (mDNS)",
+            value="thorough",
+            variable=self.mode_value
+        ).grid(row=0, column=5, sticky="w", padx=(6, 20))
+
+        self.scan_button = ttk.Button(
+            frame,
+            text="Scan",
+            command=self.start_scan
+        )
+
+        self.scan_button.grid(row=0, column=6, padx=(0, 6))
+
+        self.cancel_button = ttk.Button(
+            frame,
+            text="Cancel",
+            command=self.cancel_scan,
+            state="disabled"
+        )
+
+        self.cancel_button.grid(row=0, column=7)
+
+        self._on_network_selected()
+
+    def _build_table(self):
+
+        frame = ttk.Frame(self.root, padding=(10, 0))
+        frame.pack(fill="both", expand=True)
+
+        self.table = ttk.Treeview(
+            frame,
+            columns=[name for name, _, _ in COLUMNS],
+            show="headings",
+            selectmode="browse"
+        )
+
+        for name, heading, width in COLUMNS:
+
+            self.table.heading(name, text=heading)
+            self.table.column(name, width=width, anchor="w")
+
+        scrollbar = ttk.Scrollbar(
+            frame,
+            orient="vertical",
+            command=self.table.yview
+        )
+
+        self.table.configure(
+            yscrollcommand=scrollbar.set
+        )
+
+        self.table.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self.table.bind("<Double-1>", self._begin_note_edit)
+        self.table.bind("<Return>", self._begin_note_edit)
+
+    def _build_status(self):
+
+        frame = ttk.Frame(self.root, padding=10)
+        frame.pack(fill="both")
+
+        self.status_value = tk.StringVar(
+            value="Double-click the Note column to describe a device."
+        )
+
+        ttk.Label(
+            frame,
+            textvariable=self.status_value
+        ).pack(anchor="w")
+
+        self.log = tk.Text(frame, height=8, wrap="none")
+        self.log.configure(state="disabled")
+        self.log.pack(fill="both", expand=True, pady=(6, 0))
+
+    # --------------------------------------------------------
+    # Controls
+    # --------------------------------------------------------
+
+    def _on_network_selected(self, event=None):
+
+        index = self.network_choice.current()
+
+        if 0 <= index < len(self.networks):
+
+            self.range_value.set(
+                str(self.networks[index]["network"])
+            )
+
+    def start_scan(self):
+
+        if self.scan_thread and self.scan_thread.is_alive():
+            return
+
+        range_text = self.range_value.get().strip()
+
+        if not range_text:
+
+            messagebox.showerror(
+                "Network Scanner",
+                "Enter a range such as 192.168.1.0/24, "
+                "192.168.1.10-192.168.1.20 or 192.168.1.10."
+            )
+
+            return
+
+        try:
+
+            hosts = parse_scan_range(range_text)
+
+        except ValueError as error:
+
+            messagebox.showerror(
+                "Network Scanner",
+                f"Invalid range: {error}"
+            )
+
+            return
+
+        self._close_note_editor()
+        self.table.delete(*self.table.get_children())
+
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
+
+        mode = self.mode_value.get()
+
+        self.cancel_event = threading.Event()
+
+        self.scan_button.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
+
+        self.status_value.set(
+            f"Scanning {range_text} ({mode})..."
+        )
+
+        self.scan_thread = threading.Thread(
+            target=self._run_scan,
+            args=(hosts, mode, self.cancel_event),
+            daemon=True
+        )
+
+        self.scan_thread.start()
+
+    def cancel_scan(self):
+
+        if self.cancel_event:
+
+            self.cancel_event.set()
+
+            self.status_value.set(
+                "Cancelling scan..."
+            )
+
+    # --------------------------------------------------------
+    # Worker thread
+    # --------------------------------------------------------
+
+    def _run_scan(self, hosts, mode, cancel_event):
+
+        def progress(text, transient=False):
+
+            self.messages.put(
+                ("status" if transient else "log", text)
+            )
+
+        try:
+
+            devices = scan_network(
+                hosts,
+                mode,
+                progress,
+                cancel_event
+            )
+
+            self.messages.put(("results", devices))
+
+        except Exception as error:
+
+            self.messages.put(("error", str(error)))
+
+    def _drain_messages(self):
+
+        try:
+
+            while True:
+
+                kind, payload = self.messages.get_nowait()
+
+                if kind == "status":
+                    self.status_value.set(payload)
+
+                elif kind == "log":
+                    self._append_log(payload)
+
+                elif kind == "results":
+                    self._show_results(payload)
+
+                elif kind == "error":
+
+                    self._finish_scan()
+
+                    messagebox.showerror(
+                        "Network Scanner",
+                        f"Scan failed: {payload}"
+                    )
+
+        except queue.Empty:
+
+            pass
+
+        self.root.after(100, self._drain_messages)
+
+    def _append_log(self, text):
+
+        self.log.configure(state="normal")
+        self.log.insert("end", f"{text}\n")
+        self.log.see("end")
+        self.log.configure(state="disabled")
+
+    # --------------------------------------------------------
+    # Results
+    # --------------------------------------------------------
+
+    def _show_results(self, devices):
+
+        for ip in sorted(devices, key=ipaddress.ip_address):
+
+            device = devices[ip]
+
+            note = self.notes.get(
+                note_key(ip, device["mac"]),
+                ""
+            )
+
+            self.table.insert(
+                "",
+                "end",
+                values=(
+                    ip,
+                    device["hostname"],
+                    device["mac"],
+                    device["method"],
+                    note
+                )
+            )
+
+        cancelled = (
+            self.cancel_event is not None
+            and self.cancel_event.is_set()
+        )
+
+        self.status_value.set(
+            f"{'Cancelled - ' if cancelled else ''}"
+            f"Devices found: {len(devices)}"
+        )
+
+        self._finish_scan()
+
+    def _finish_scan(self):
+
+        self.scan_button.configure(state="normal")
+        self.cancel_button.configure(state="disabled")
+
+    # --------------------------------------------------------
+    # Note editing
+    # --------------------------------------------------------
+
+    def _begin_note_edit(self, event):
+
+        self._close_note_editor()
+
+        row = self.table.focus()
+
+        if event.type == tk.EventType.ButtonPress:
+
+            row = self.table.identify_row(event.y)
+
+            if self.table.identify_column(event.x) != "#5":
+                return
+
+        if not row:
+            return
+
+        box = self.table.bbox(row, "note")
+
+        if not box:
+            return
+
+        x, y, width, height = box
+
+        editor = ttk.Entry(self.table)
+        editor.place(x=x, y=y, width=width, height=height)
+        editor.insert(0, self.table.set(row, "note"))
+        editor.select_range(0, "end")
+        editor.focus_set()
+
+        editor.bind(
+            "<Return>",
+            lambda _event: self._commit_note(row, editor)
+        )
+
+        editor.bind(
+            "<FocusOut>",
+            lambda _event: self._commit_note(row, editor)
+        )
+
+        editor.bind(
+            "<Escape>",
+            lambda _event: self._close_note_editor()
+        )
+
+        self.note_editor = editor
+
+    def _commit_note(self, row, editor):
+
+        if self.note_editor is not editor:
+            return
+
+        note = editor.get().strip()
+
+        self.table.set(row, "note", note)
+
+        key = note_key(
+            self.table.set(row, "ip"),
+            self.table.set(row, "mac")
+        )
+
+        if note:
+            self.notes[key] = note
+        else:
+            self.notes.pop(key, None)
+
+        save_notes(self.notes)
+
+        self._close_note_editor()
+
+        self.status_value.set(
+            f"Note saved for {self.table.set(row, 'ip')}."
+        )
+
+    def _close_note_editor(self):
+
+        if self.note_editor is not None:
+
+            editor = self.note_editor
+            self.note_editor = None
+            editor.destroy()
+
+    # --------------------------------------------------------
+    # Shutdown
+    # --------------------------------------------------------
+
+    def on_close(self):
+
+        if self.cancel_event:
+            self.cancel_event.set()
+
+        save_notes(self.notes)
+
+        self.root.destroy()
+
+
+def run_gui():
+
+    root = tk.Tk()
+    ScannerWindow(root)
+    root.mainloop()
 
 
 # ============================================================
@@ -1253,4 +1887,8 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-    main()
+
+    if "--console" in sys.argv:
+        main()
+    else:
+        run_gui()
