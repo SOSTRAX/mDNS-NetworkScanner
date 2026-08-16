@@ -42,7 +42,35 @@ The current prototype can:
 
 \- Save and reuse the previous scan range
 
+\- Show the results in a graphical window with a Note column
+
+\- Remember each device note between scans (device\_notes.json)
+
 \- Export functionality is planned
+
+
+
+\## Running
+
+
+
+```text
+
+python mDNS-NetworkScanner.py            # graphical interface
+
+python mDNS-NetworkScanner.py --console  # original text menu
+
+```
+
+
+
+In the graphical interface, double-click a row's Note column
+
+(or select the row and press Enter) to type a note. Notes are
+
+keyed by MAC address, so they follow a device when its IP
+
+address changes.
 
 
 
