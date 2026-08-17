@@ -3,6 +3,139 @@ import subprocess
 import logging
 import os
 import json
+import math
+import datetime
+import tkinter as tk
+from tkinter import ttk
+
+# ============================================================
+# Startup splash while libraries are loading
+# ============================================================
+
+def get_branding_icon():
+    """Returns a reusable branded PNG icon for the splash and main window."""
+    icon_data = """iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA/ElEQVR42s2Xyw3CMAyGPQEcuwMTsBzjMEanYAo2qBASlQ8BK3L8Kop9sKrUqf8vdvOC2+P9QTsvl+mGutAAZkM0TaCNCMTp/gyLfwGsEChmNYs4tkFyRoQlEC4+aIT4lAQsfmlwoKWJWh/Y6+fKC5Za/QuA03FloInQ9nXdRL87A94RUgBrhsIANIgEoH07BJD+chpoe/0MAWibK4c0PcEz3zkICjAq1yEAGqwXoQD9e22dUAG4GnIj7WcB14fLyiGAkYDmFwFG4jjCkUX69RB1MlDuH0ifBeXWgSkrYfpeUGI3TD8PlD4RTTkTpp6KU+8FqTej1Lth9u14Bxum5xw9DdIQAAAAAElFTkSuQmCC"""
+    try:
+        return tk.PhotoImage(data=icon_data)
+    except Exception:
+        return None
+
+
+def show_startup_splash(message="Please wait, loading libraries..."):
+    """Displays a branded splash window with a rotating network-style loading icon."""
+    splash = tk.Tk()
+    splash.withdraw()
+    splash.title("mDNS Network Scanner")
+    brand_icon = get_branding_icon()
+    if brand_icon:
+        try:
+            splash.iconphoto(False, brand_icon)
+        except Exception:
+            pass
+    splash.overrideredirect(True)
+    splash.attributes("-topmost", True)
+    splash.configure(bg="#0F172A")
+
+    width = 440
+    height = 190
+    screen_width = splash.winfo_screenwidth()
+    screen_height = splash.winfo_screenheight()
+    x = (screen_width - width) // 2
+    y = (screen_height - height) // 2
+    splash.geometry(f"{width}x{height}+{x}+{y}")
+
+    style = ttk.Style(splash)
+    try:
+        style.theme_use("clam")
+    except Exception:
+        pass
+    style.configure("Splash.TFrame", background="#0F172A")
+    style.configure("Splash.TLabel", background="#0F172A", foreground="#E2E8F0")
+
+    container = ttk.Frame(splash, padding=(8, 10, 8, 8), style="Splash.TFrame")
+    container.pack(fill=tk.BOTH, expand=True)
+
+    header = tk.Frame(container, bg="#0F172A")
+    header.pack(fill=tk.X)
+
+    icon_label = tk.Label(header, bg="#0F172A", bd=0, padx=0, pady=0)
+    icon_label.pack(side=tk.LEFT)
+    if brand_icon:
+        icon_label.configure(image=brand_icon)
+        icon_label.image = brand_icon
+
+    title = tk.Label(
+        header,
+        text="mDNS Network Scanner",
+        font=("Segoe UI", 15, "bold"),
+        bg="#0F172A",
+        fg="#F8FAFC",
+        anchor=tk.W,
+    )
+    title.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+
+    label = tk.Label(
+        container,
+        text=message,
+        font=("Segoe UI", 10, "bold"),
+        bg="#0F172A",
+        fg="#E0F2FE",
+        anchor=tk.CENTER,
+        justify=tk.CENTER,
+        wraplength=350,
+    )
+    label.pack(fill=tk.X, pady=(10, 0))
+
+    canvas = tk.Canvas(container, width=110, height=96, bg="#0F172A", highlightthickness=0)
+    canvas.pack(anchor=tk.CENTER, pady=(2, 0))
+
+    angle = [0.0]
+
+    def draw_network_icon():
+        if not splash.winfo_exists():
+            return
+
+        canvas.delete("all")
+        cx = 55
+        cy = 55
+        orbit_r = 28
+
+        canvas.create_oval(cx - 36, cy - 36, cx + 36, cy + 36, outline="#1E293B", width=2)
+
+        for i in range(3):
+            theta = i * (2 * math.pi / 3) + angle[0]
+            x = cx + orbit_r * math.cos(theta)
+            y = cy + orbit_r * math.sin(theta)
+            canvas.create_line(cx, cy, x, y, fill="#38BDF8", width=2)
+            canvas.create_oval(x - 7, y - 7, x + 7, y + 7, fill="#7DD3FC", outline="#E0F2FE", width=1)
+
+        canvas.create_oval(cx - 15, cy - 15, cx + 15, cy + 15, fill="#0EA5E9", outline="#E2E8F0", width=2)
+
+        lead_a = angle[0]
+        led_x = cx + orbit_r * math.cos(lead_a)
+        led_y = cy + orbit_r * math.sin(lead_a)
+        canvas.create_oval(led_x - 8, led_y - 8, led_x + 8, led_y + 8, fill="#F8FAFC", outline="#38BDF8", width=2)
+
+        angle[0] = (angle[0] + 0.12) % (2 * math.pi)
+        splash.update_idletasks()
+
+    animation_id = [None]
+
+    def animate():
+        if not splash.winfo_exists():
+            return
+
+        draw_network_icon()
+        splash.update()
+        animation_id[0] = splash.after(30, animate)
+
+    splash.deiconify()
+    splash.update_idletasks()
+    animation_id[0] = splash.after(30, animate)
+    splash.update()
+    splash._animated_id = animation_id
+    return splash, label
+
 
 # ============================================================
 # Suppress Scapy pcap/libpcap warnings at startup
@@ -25,15 +158,19 @@ REQUIRED_PACKAGES = {
     "openpyxl": "openpyxl"
 }
 
-def install_missing_packages():
+def install_missing_packages(splash_window=None, status_label=None):
     missing = []
     for module_name, pip_name in REQUIRED_PACKAGES.items():
         try:
             __import__(module_name)
         except ImportError:
             missing.append(pip_name)
-            
+
     if missing:
+        if splash_window and status_label:
+            status_label.config(text="Installing required libraries. Please wait...")
+            splash_window.update()
+
         print(f"Missing required packages: {', '.join(missing)}")
         print("Automatically installing via pip...")
         try:
@@ -43,7 +180,31 @@ def install_missing_packages():
             print(f"Error installing packages automatically: {e}")
             sys.exit(1)
 
-install_missing_packages()
+    if splash_window and status_label:
+        status_label.config(text="Loading network scanner components...")
+        splash_window.update()
+
+
+def close_startup_splash(splash_window):
+    if splash_window is None:
+        return
+
+    try:
+        animation_state = getattr(splash_window, "_animated_id", None)
+        if animation_state is not None:
+            animation_id = animation_state[0]
+            if animation_id is not None:
+                splash_window.after_cancel(animation_id)
+    except Exception:
+        pass
+
+    try:
+        if splash_window.winfo_exists():
+            splash_window.update_idletasks()
+            splash_window.destroy()
+    except Exception:
+        pass
+
 
 import ipaddress
 import socket
@@ -66,15 +227,20 @@ finally:
     # Restore standard stderr after Scapy import finishes
     sys.stderr = sys.stderr_bak
 
-# Initialize live MAC lookup engine
-try:
-    mac_lookup_engine = MacLookup()
+def initialize_mac_lookup_engine():
+    """Initialize live MAC lookup engine after splash displays so startup remains visible."""
+    global mac_lookup_engine
     try:
-        mac_lookup_engine.update_vendors()
+        mac_lookup_engine = MacLookup()
+        try:
+            mac_lookup_engine.update_vendors()
+        except Exception:
+            pass
     except Exception:
-        pass
-except Exception:
-    mac_lookup_engine = None
+        mac_lookup_engine = None
+
+
+mac_lookup_engine = None
 
 
 # ============================================================
@@ -441,17 +607,34 @@ def get_arp_table():
     return arp_devices
 
 
+def get_default_gateway_ip():
+    """Returns the active default gateway IP for this host."""
+    try:
+        result = subprocess.run(
+            ["route", "print", "0.0.0.0"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        for line in result.stdout.splitlines():
+            if re.search(r"^\s*0\.0\.0\.0\s+\S+\s+(\d+\.\d+\.\d+\.\d+)", line, re.IGNORECASE):
+                match = re.search(r"^\s*0\.0\.0\.0\s+\S+\s+(\d+\.\d+\.\d+\.\d+)", line, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def get_default_gateway_mac():
     """Identifies the default gateway's MAC address."""
     try:
-        result = subprocess.run(["route", "print", "0.0.0.0"], capture_output=True, text=True)
-        for line in result.stdout.splitlines():
-            if "0.0.0.0" in line:
-                parts = line.split()
-                if len(parts) >= 3:
-                    gw_ip = parts[2]
-                    arp_table = get_arp_table()
-                    return arp_table.get(gw_ip)
+        gw_ip = get_default_gateway_ip()
+        if not gw_ip:
+            return None
+        arp_table = get_arp_table()
+        return arp_table.get(gw_ip)
     except Exception:
         pass
     return None
@@ -744,7 +927,7 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
         hostname = mdns_name or dns_netbios_name
         is_proxy_mac = mac in proxy_macs
 
-        real_mac = mac if not is_proxy_mac else ""
+        real_mac = mac if mac else ""
         vendor = get_vendor_by_mac(real_mac)
 
         if not hostname and vendor:
@@ -771,7 +954,7 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
 
         # Determine vendor string format
         if is_proxy_mac:
-            vendor_label = f"Gateway/Proxy [{vendor if vendor else 'Unknown Vendor'}]"
+            vendor_label = f"{vendor if vendor else 'Unknown Vendor'} [Gateway/Proxy]"
         else:
             vendor_label = vendor if vendor else "Unknown Vendor"
 
@@ -781,7 +964,8 @@ def scan_network_gui(hosts, discovery_mode="fast", status_callback=None, cancel_
             "hostname": hostname,
             "method": " + ".join(methods) if methods else "Active Probe",
             "ports": open_ports,
-            "notes": saved_note
+            "notes": saved_note,
+            "discovered_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
     return devices
@@ -818,14 +1002,17 @@ class TreeviewTooltip:
 class NetworkScannerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("mDNS & Network Scanner - Active Controls & Live Filtering")
         self.root.geometry("1360x760")
         self.root.minsize(1040, 580)
+        self.apply_window_branding()
 
         self.adapters = get_network_adapters()
         self.scan_results = {}
+        self.current_display_results = {}
+        self._scan_previous_results = {}
         self.cancel_event = threading.Event()
         self.is_scan_running = False
+        self._has_completed_scan = False
 
         self.setup_styles()
         self.create_widgets()
@@ -882,89 +1069,139 @@ class NetworkScannerGUI:
         self.root.update()
         self.set_status(f"Copied to clipboard: '{text}'", status_type="ready")
 
+    def apply_window_branding(self):
+        """Applies the same title and icon used by the splash window."""
+        self.root.title("mDNS Network Scanner")
+        self.root.configure(bg="#F8FAFC")
+        brand_icon = get_branding_icon()
+        if brand_icon:
+            try:
+                self.root.iconphoto(False, brand_icon)
+            except Exception:
+                pass
 
     def setup_styles(self):
         self.style = ttk.Style()
         self.style.theme_use("clam")
         self.style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
         self.style.configure("Treeview", font=("Segoe UI", 9), rowheight=24)
+        self.style.configure("ScanPrimary.TButton", background="#166534", foreground="white", font=("Segoe UI", 9, "bold"))
+        self.style.map("ScanPrimary.TButton", background=[("active", "#14532d"), ("disabled", "#4b5563")], foreground=[("active", "white"), ("disabled", "#e5e7eb")])
+        self.style.configure("RescanOrange.TButton", background="#C2410C", foreground="white", font=("Segoe UI", 9, "bold"))
+        self.style.map("RescanOrange.TButton", background=[("active", "#9A4B0A"), ("disabled", "#9ca3af")], foreground=[("active", "white"), ("disabled", "#f3f4f6")])
+        self.style.configure("StopRed.TButton", background="#7F1D1D", foreground="white", font=("Segoe UI", 9, "bold"))
+        self.style.map("StopRed.TButton", background=[("active", "#450A0A"), ("disabled", "#9ca3af")], foreground=[("active", "white"), ("disabled", "#f3f4f6")])
+        self.style.configure("ExportBlue.TButton", background="#240EE9", foreground="white", font=("Segoe UI", 9, "bold"))
+        self.style.map("ExportBlue.TButton", background=[("active", "#0284C7"), ("disabled", "#94a3b8")], foreground=[("active", "white"), ("disabled", "#f8fafc")])
+
+        self.brand_icon = get_branding_icon()
 
     def create_widgets(self):
+        branding_bar = tk.Frame(self.root, bg="#E2E8F0", height=34)
+        branding_bar.pack(fill=tk.X, padx=0, pady=(0, 4))
+        branding_bar.pack_propagate(False)
+
+        icon_label = tk.Label(branding_bar, bg="#E2E8F0", bd=0, padx=6, pady=2)
+        icon_label.pack(side=tk.LEFT, padx=(10, 0))
+        if self.brand_icon:
+            icon_label.configure(image=self.brand_icon)
+            icon_label.image = self.brand_icon
+
+        title_label = tk.Label(
+            branding_bar,
+            text="mDNS Network Scanner",
+            bg="#E2E8F0",
+            fg="#0F172A",
+            font=("Segoe UI", 13, "bold"),
+            anchor=tk.W,
+        )
+        title_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         # 1. Top Configuration Frame
-        ctrl_frame = ttk.LabelFrame(self.root, text=" Network Selection & Configuration ", padding=10)
+        ctrl_frame = ttk.LabelFrame(self.root, text=" Network Selection & Configuration ", padding=8)
         ctrl_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        ttk.Label(ctrl_frame, text="Interface / Subnet:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        
+        ttk.Label(ctrl_frame, text="Interface / Subnet:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=(2, 1))
         self.adapter_var = tk.StringVar()
         self.adapter_combo = ttk.Combobox(ctrl_frame, textvariable=self.adapter_var, width=50, state="readonly")
-        
+
         combo_values = []
         for net in self.adapters:
             net_str = str(net['network'])
             ip_str = ", ".join(net['ips'])
             adapter_str = ", ".join(net['adapters'])
             combo_values.append(f"{net_str} ({ip_str}) - {adapter_str}")
-        
+
         combo_values.append("Custom IP / Range / CIDR...")
         self.adapter_combo['values'] = combo_values
         if combo_values:
             self.adapter_combo.current(0)
-        self.adapter_combo.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+        self.adapter_combo.grid(row=0, column=1, sticky=tk.W, padx=5, pady=(2, 1))
         self.adapter_combo.bind("<<ComboboxSelected>>", self.on_adapter_select)
 
-        ttk.Label(ctrl_frame, text="Custom Range:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(ctrl_frame, text="Custom Range:").grid(row=0, column=2, sticky=tk.W, padx=(12, 5), pady=(2, 1))
         self.custom_entry = ttk.Entry(ctrl_frame, width=28, state="disabled")
-        self.custom_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
+        self.custom_entry.grid(row=0, column=3, sticky=tk.W, padx=5, pady=(2, 1))
 
-        ttk.Label(ctrl_frame, text="Discovery Mode:").grid(row=0, column=2, sticky=tk.W, padx=12, pady=5)
-        self.mode_var = tk.StringVar(value="fast")
-        ttk.Radiobutton(ctrl_frame, text="Fast Scan (Ping + ARP + NetBIOS + Ports)", variable=self.mode_var, value="fast").grid(row=0, column=3, sticky=tk.W)
-        ttk.Radiobutton(ctrl_frame, text="Thorough Scan (Fast + Full mDNS)", variable=self.mode_var, value="thorough").grid(row=1, column=3, sticky=tk.W)
+        ttk.Label(ctrl_frame, text="Discovery Mode:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=(2, 1))
+        self.mode_var = tk.StringVar(value="thorough")
+        ttk.Radiobutton(ctrl_frame, text="Fast Scan (Ping + ARP + NetBIOS + Ports)", variable=self.mode_var, value="fast").grid(row=1, column=1, sticky=tk.W, padx=5, pady=(2, 1))
+        ttk.Radiobutton(ctrl_frame, text="Thorough Scan (Fast + Full mDNS)", variable=self.mode_var, value="thorough").grid(row=1, column=2, columnspan=2, sticky=tk.W, padx=(12, 5), pady=(2, 1))
 
         # Action Buttons Box
         btn_box = ttk.Frame(ctrl_frame)
-        btn_box.grid(row=0, column=4, rowspan=2, padx=10, pady=5, sticky="NSEW")
+        btn_box.grid(row=0, column=4, rowspan=2, padx=10, pady=2, sticky="NSEW")
 
-        self.scan_btn = ttk.Button(btn_box, text="Start Scan", command=self.start_scan_thread, width=12)
+        self.scan_btn = ttk.Button(btn_box, text="Start Scan", style="ScanPrimary.TButton", command=lambda: self.start_scan_thread(preserve_existing=False), width=12)
         self.scan_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
 
-        self.stop_btn = ttk.Button(btn_box, text="Stop Scan", command=self.stop_scan, state="disabled", width=12)
+        self.rescan_btn = ttk.Button(btn_box, text="Rescan", style="RescanOrange.TButton", command=lambda: self.start_scan_thread(preserve_existing=True), width=12, state="disabled")
+        self.rescan_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
+
+        self.stop_btn = ttk.Button(btn_box, text="Stop Scan", style="StopRed.TButton", command=self.stop_scan, state="disabled", width=12)
         self.stop_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
 
-        self.export_btn = ttk.Button(btn_box, text="Export Excel", command=self.export_to_excel, width=12)
-        self.export_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
-
-        # 2. Live Search & Filter Bar
-        filter_frame = ttk.LabelFrame(self.root, text=" Live Search & Filter ", padding=8)
+        # 2. Live Search & Filter Bar (unified 50/50 split)
+        filter_frame = ttk.Frame(self.root, padding=(8, 3))
         filter_frame.pack(fill=tk.X, padx=10, pady=2)
 
-        ttk.Label(filter_frame, text="Filter Target:").pack(side=tk.LEFT, padx=(5, 5))
+        # Left half: Search & Filter controls
+        search_panel = ttk.Frame(filter_frame)
+        search_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        ttk.Label(search_panel, text="Filter Target:").pack(side=tk.LEFT, padx=(0, 3))
         self.filter_field_var = tk.StringVar(value="All Fields")
         self.filter_combo = ttk.Combobox(
-            filter_frame,
+            search_panel,
             textvariable=self.filter_field_var,
             values=["All Fields", "IP Address", "MAC Address", "Vendor", "Hostname", "Open Ports", "Notes"],
             state="readonly",
-            width=16
+            width=14
         )
-        self.filter_combo.pack(side=tk.LEFT, padx=5)
+        self.filter_combo.pack(side=tk.LEFT, padx=3)
         self.filter_combo.bind("<<ComboboxSelected>>", lambda e: self.apply_filter())
 
-        ttk.Label(filter_frame, text="Search Query:").pack(side=tk.LEFT, padx=(15, 5))
+        ttk.Label(search_panel, text="Query:").pack(side=tk.LEFT, padx=(10, 3))
         self.filter_query_var = tk.StringVar()
-        self.filter_entry = ttk.Entry(filter_frame, textvariable=self.filter_query_var, width=38)
-        self.filter_entry.pack(side=tk.LEFT, padx=5)
+        self.filter_entry = ttk.Entry(search_panel, textvariable=self.filter_query_var, width=28)
+        self.filter_entry.pack(side=tk.LEFT, padx=3)
         self.filter_query_var.trace_add("write", lambda *args: self.apply_filter())
 
-        clear_filter_btn = ttk.Button(filter_frame, text="Clear Filter", command=self.clear_filter, width=11)
-        clear_filter_btn.pack(side=tk.LEFT, padx=10)
+        clear_filter_btn = ttk.Button(search_panel, text="Clear", command=self.clear_filter, width=8)
+        clear_filter_btn.pack(side=tk.LEFT, padx=5)
+
+        # Right half: Export controls
+        export_panel = ttk.Frame(filter_frame)
+        export_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        self.export_btn = ttk.Button(export_panel, text="Export Excel", style="ExportBlue.TButton", command=self.export_to_excel)
+        self.export_btn.pack(fill=tk.BOTH, expand=True)
 
         # 3. Results Table Frame
         tree_frame = ttk.Frame(self.root, padding=10)
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
-        columns = ("ip", "mac", "vendor", "hostname", "method", "ports", "notes")
+        columns = ("ip", "mac", "vendor", "hostname", "method", "ports", "discovered", "notes")
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
 
         self.tree.heading("ip", text="IP Address")
@@ -973,6 +1210,7 @@ class NetworkScannerGUI:
         self.tree.heading("hostname", text="Hostname / Resolved Device")
         self.tree.heading("method", text="Discovery Method")
         self.tree.heading("ports", text="Open Ports")
+        self.tree.heading("discovered", text="Discovered")
         self.tree.heading("notes", text="Notes (Double-Click to Edit / Auto-Saved)")
 
         self.tree.column("ip", width=110, anchor=tk.W)
@@ -981,7 +1219,17 @@ class NetworkScannerGUI:
         self.tree.column("hostname", width=200, anchor=tk.W)
         self.tree.column("method", width=160, anchor=tk.W)
         self.tree.column("ports", width=110, anchor=tk.W)
+        self.tree.column("discovered", width=150, anchor=tk.W)
         self.tree.column("notes", width=240, anchor=tk.W)
+
+        self.tree.tag_configure("existing", background="white")
+        self.tree.tag_configure("new", background="#D9F7E8")
+        self.tree.tag_configure("missing", background="#E5E7EB")
+
+        self.sort_state = {}
+        for col in columns:
+            self.sort_state[col] = "none"
+            self.tree.heading(col, command=lambda c=col: self.sort_treeview(c))
 
         self.tree.bind("<Double-1>", self.on_double_click)
 
@@ -1033,14 +1281,82 @@ class NetworkScannerGUI:
         else:
             self.custom_entry.config(state="disabled")
 
+    def update_action_button_states(self):
+        self.scan_btn.config(state="disabled" if self.is_scan_running else "normal")
+        self.stop_btn.config(state="normal" if self.is_scan_running else "disabled")
+        self.rescan_btn.config(state="normal" if (self._has_completed_scan and not self.is_scan_running) else "disabled")
+
     def stop_scan(self):
         """Triggers cancellation event and updates status indicator."""
         if self.is_scan_running:
             self.cancel_event.set()
-            self.stop_btn.config(state="disabled")
+            self.update_action_button_states()
             self.set_status("Cancellation requested... Waiting for active thread pools to finalize...", status_type="stopping")
 
-    def start_scan_thread(self):
+    def update_sort_indicator(self, column, direction):
+        """Sets a visible ascending/descending arrow on the active sorted column."""
+        column_labels = {
+            "ip": "IP Address",
+            "mac": "MAC Address",
+            "vendor": "Vendor / Manufacturer",
+            "hostname": "Hostname / Resolved Device",
+            "method": "Discovery Method",
+            "ports": "Open Ports",
+            "discovered": "Discovered",
+            "notes": "Notes (Double-Click to Edit / Auto-Saved)"
+        }
+
+        for key in self.sort_state:
+            self.sort_state[key] = "none"
+
+        self.sort_state[column] = direction
+
+        for col_key, label in column_labels.items():
+            current_state = self.sort_state.get(col_key, "none")
+            arrow = " ▲" if current_state == "asc" else " ▼" if current_state == "desc" else ""
+            self.tree.heading(col_key, text=label + arrow)
+
+    def sort_treeview(self, column):
+        """Sort treeview rows by selected column value."""
+        items = [(self.tree.set(child, column), child) for child in self.tree.get_children("")]
+
+        def sort_key(entry):
+            value, child = entry
+            text = str(value or "").strip()
+            if column == "ip":
+                try:
+                    return (0, int(ipaddress.ip_address(text)))
+                except ValueError:
+                    return (1, text.lower())
+            if column == "discovered":
+                try:
+                    return (0, datetime.datetime.strptime(text, "%Y-%m-%d %H:%M:%S"))
+                except ValueError:
+                    return (1, text.lower())
+            if column == "ports":
+                try:
+                    if text == "None":
+                        return (0, -1)
+                    first = next(int(part) for part in text.split(",") if part.strip().isdigit())
+                    return (0, first)
+                except StopIteration:
+                    return (1, text.lower())
+            return (0, text.lower())
+
+        current_direction = self.sort_state.get(column, "none")
+        if current_direction == "asc":
+            direction = "desc"
+            items.sort(key=sort_key, reverse=True)
+        else:
+            direction = "asc"
+            items.sort(key=sort_key)
+
+        for index, (_, child) in enumerate(items):
+            self.tree.move(child, "", index)
+
+        self.update_sort_indicator(column, direction)
+
+    def start_scan_thread(self, preserve_existing=False):
         selected = self.adapter_combo.get()
         if not selected:
             messagebox.showwarning("Selection Warning", "Please select a network interface or custom range.")
@@ -1064,13 +1380,16 @@ class NetworkScannerGUI:
             messagebox.showwarning("Target Error", "No valid target host IP addresses generated.")
             return
 
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        if not preserve_existing:
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            self.current_display_results = {}
+        else:
+            self._scan_previous_results = dict(self.scan_results)
 
         self.cancel_event.clear()
         self.is_scan_running = True
-        self.scan_btn.config(state="disabled")
-        self.stop_btn.config(state="normal")
+        self.update_action_button_states()
         self.set_status("Initializing native multi-stage network scanner...", status_type="running")
 
         mode = self.mode_var.get()
@@ -1083,11 +1402,12 @@ class NetworkScannerGUI:
 
     def run_scan(self, hosts, mode):
         """Executes the network scan in a background thread."""
-        gateway_ip = "192.168.2.1"  # Or your dynamically parsed gateway IP
-        
-        # Pre-warm the ARP cache for the gateway before parsing devices
-        prewarm_arp_cache(gateway_ip)
-        
+        gateway_ip = get_default_gateway_ip()
+
+        # Pre-warm the ARP cache for the actual gateway before parsing devices.
+        if gateway_ip:
+            prewarm_arp_cache(gateway_ip)
+
         try:
             results = scan_network_gui(
                 hosts,
@@ -1095,23 +1415,73 @@ class NetworkScannerGUI:
                 status_callback=lambda msg: self.set_status(msg, status_type="running") if not self.cancel_event.is_set() else None,
                 cancel_event=self.cancel_event
             )
-            
+
+            previous_results = self._scan_previous_results if hasattr(self, "_scan_previous_results") else {}
             if self.cancel_event.is_set():
+                self._has_completed_scan = False
                 self.scan_results = {}
-                self.root.after(0, self.populate_results, {})
+                self.root.after(0, self.populate_results, {}, previous_results)
                 self.set_status("Scan stopped mid-operation by user. Results cleared.", status_type="stopped")
             else:
+                self._has_completed_scan = True
                 self.scan_results = results
-                self.root.after(0, self.populate_results, results)
+                self.root.after(0, self.populate_results, results, previous_results)
         except Exception as e:
+            self._has_completed_scan = False
             self.root.after(0, lambda: messagebox.showerror("Scan Failure", str(e)))
             self.set_status(f"Scan aborted due to error: {e}", status_type="stopped")
         finally:
             self.is_scan_running = False
-            self.root.after(0, lambda: self.scan_btn.config(state="normal"))
-            self.root.after(0, lambda: self.stop_btn.config(state="disabled"))
+            self.root.after(0, self.update_action_button_states)
 
-    def populate_results(self, results):
+    def populate_results(self, results, previous_results=None):
+        if previous_results is None:
+            previous_results = {}
+
+        merged_results = dict(previous_results)
+        merged_results.update(results)
+        self.current_display_results = merged_results
+
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        for ip in sorted(merged_results.keys(), key=ipaddress.ip_address):
+            info = merged_results[ip]
+            if ip in results and ip in previous_results:
+                tag = "existing"
+            elif ip in results and ip not in previous_results:
+                tag = "new"
+            elif ip in previous_results and ip not in results:
+                tag = "missing"
+            else:
+                tag = "existing"
+
+            row_data = {
+                "IP Address": ip,
+                "MAC Address": info.get('mac', 'N/A'),
+                "Vendor": info.get('vendor', 'Unknown Vendor'),
+                "Hostname": info.get('hostname', ''),
+                "Open Ports": info.get('ports', 'None'),
+                "Discovered": info.get('discovered_at', "Unknown"),
+                "Notes": info.get('notes', '')
+            }
+
+            self.tree.insert(
+                "",
+                tk.END,
+                values=(
+                    ip,
+                    row_data["MAC Address"],
+                    row_data["Vendor"],
+                    row_data["Hostname"],
+                    info.get('method', 'Active Probe'),
+                    row_data["Open Ports"],
+                    row_data["Discovered"],
+                    row_data["Notes"]
+                ),
+                tags=(tag,)
+            )
+
         self.apply_filter()
         if not results and not self.cancel_event.is_set():
             self.set_status("Scan completed. No active hosts discovered on subnet.", status_type="ready")
@@ -1134,41 +1504,51 @@ class NetworkScannerGUI:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        if not self.scan_results:
+        source_results = self.current_display_results if self.current_display_results else self.scan_results
+        if not source_results:
             return
 
-        for ip in sorted(self.scan_results.keys(), key=ipaddress.ip_address):
-            info = self.scan_results[ip]
+        for ip in sorted(source_results.keys(), key=ipaddress.ip_address):
+            info = source_results[ip]
             row_data = {
                 "IP Address": ip,
-                "MAC Address": info['mac'],
-                "Vendor": info['vendor'],
-                "Hostname": info['hostname'],
-                "Open Ports": info['ports'],
-                "Notes": info['notes']
+                "MAC Address": info.get('mac', 'N/A'),
+                "Vendor": info.get('vendor', 'Unknown Vendor'),
+                "Hostname": info.get('hostname', ''),
+                "Open Ports": info.get('ports', 'None'),
+                "Discovered": info.get('discovered_at', 'Unknown'),
+                "Notes": info.get('notes', '')
             }
 
             match = False
             if not query:
                 match = True
             elif field_target == "All Fields":
-                match = any(query in str(val).lower() for val in [ip, info['mac'], info['vendor'], info['hostname'], info['method'], info['ports'], info['notes']])
+                match = any(query in str(val).lower() for val in [ip, info.get('mac', 'N/A'), info.get('vendor', 'Unknown Vendor'), info.get('hostname', ''), info.get('method', 'Active Probe'), info.get('ports', 'None'), info.get('notes', ''), info.get('discovered_at', 'Unknown')])
             elif field_target in row_data:
                 match = query in str(row_data[field_target]).lower()
 
             if match:
+                tag = "existing"
+                if ip in self.scan_results and ip not in self._scan_previous_results:
+                    tag = "new"
+                elif ip not in self.scan_results and ip in self._scan_previous_results:
+                    tag = "missing"
+
                 self.tree.insert(
                     "",
                     tk.END,
                     values=(
                         ip,
-                        info['mac'],
-                        info['vendor'],
-                        info['hostname'],
-                        info['method'],
-                        info['ports'],
-                        info['notes']
-                    )
+                        row_data["MAC Address"],
+                        row_data["Vendor"],
+                        row_data["Hostname"],
+                        info.get('method', 'Active Probe'),
+                        row_data["Open Ports"],
+                        row_data["Discovered"],
+                        row_data["Notes"]
+                    ),
+                    tags=(tag,)
                 )
 
     def on_double_click(self, event):
@@ -1213,7 +1593,7 @@ class NetworkScannerGUI:
         if not file_path:
             return
 
-        headers = ["IP Address", "MAC Address", "Vendor / Manufacturer", "Hostname / Resolved Device", "Discovery Method", "Open Ports", "Notes"]
+        headers = ["IP Address", "MAC Address", "Vendor / Manufacturer", "Hostname / Resolved Device", "Discovery Method", "Open Ports", "Discovered", "Notes"]
         rows = []
 
         for item_id in self.tree.get_children():
@@ -1264,8 +1644,29 @@ class NetworkScannerGUI:
 # ============================================================
 
 def main():
+    splash = show_startup_splash("Please wait, loading libraries...")
+    splash_window, splash_label = splash
+
+    def bootstrap_in_background():
+        try:
+            install_missing_packages(splash_window, splash_label)
+            initialize_mac_lookup_engine()
+        finally:
+            if splash_window.winfo_exists():
+                splash_window.after(0, lambda: close_startup_splash(splash_window))
+
+    startup_thread = threading.Thread(target=bootstrap_in_background, daemon=True)
+    startup_thread.start()
+
+    splash_window.mainloop()
+
     root = tk.Tk()
+    root.withdraw()
+    root.update_idletasks()
+
     app = NetworkScannerGUI(root)
+    root.update_idletasks()
+    root.deiconify()
     root.mainloop()
 
 
