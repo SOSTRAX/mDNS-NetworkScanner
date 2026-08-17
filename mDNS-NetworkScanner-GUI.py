@@ -304,6 +304,21 @@ def parse_custom_range(user_input):
     return [ipaddress.ip_address(user_input)]
 
 
+import scapy.all as scapy
+import time
+
+def prewarm_arp_cache(target_ip):
+    """
+    Sends an explicit ARP request to pre-populate the local ARP cache 
+    and ensure immediate MAC and OUI vendor resolution.
+    """
+    try:
+        # Send a rapid, lightweight ARP request (timeout 0.5s)
+        arp_req = scapy.Ether(dst="ff:ff:ff:ff:ff:ff") / scapy.ARP(pdst=str(target_ip))
+        scapy.srp(arp_req, timeout=0.5, verbose=False)
+    except Exception:
+        pass
+
 # ============================================================
 # Hostname, NetBIOS, Live Vendor & Smart Fallback Engine
 # ============================================================
@@ -1067,6 +1082,12 @@ class NetworkScannerGUI:
         ).start()
 
     def run_scan(self, hosts, mode):
+        """Executes the network scan in a background thread."""
+        gateway_ip = "192.168.2.1"  # Or your dynamically parsed gateway IP
+        
+        # Pre-warm the ARP cache for the gateway before parsing devices
+        prewarm_arp_cache(gateway_ip)
+        
         try:
             results = scan_network_gui(
                 hosts,
