@@ -1,0 +1,4 @@
+zeroconf
+scapy
+mac-vendor-lookup
+openpyxl

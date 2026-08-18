@@ -8,6 +8,25 @@ import datetime
 import tkinter as tk
 from tkinter import ttk
 
+APP_NAME = "mDNS Network Scanner"
+APP_VERSION = "1.0.0"
+APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
+APP_AUTHOR = "Michael Dietz"
+APP_COMPANY = "SOSTRAX"
+APP_CONTACT = "mike@sostrax.com"
+APP_CREDIT = f"Designed by {APP_AUTHOR} · {APP_COMPANY} · {APP_CONTACT}"
+
+RELEASE_NOTES = {
+    "version": APP_VERSION,
+    "summary": "Public release with GUI polish, version branding, and copyable custom range examples.",
+    "changes": [
+        "Added version metadata to splash and main GUI",
+        "Improved custom range helper text with selectable/copyable examples",
+        "Added hover tooltips for Rescan and Clear actions",
+        "Status messages now note newly found devices are highlighted in green",
+    ],
+}
+
 # ============================================================
 # Startup splash while libraries are loading
 # ============================================================
@@ -25,7 +44,7 @@ def show_startup_splash(message="Please wait, loading libraries..."):
     """Displays a branded splash window with a rotating network-style loading icon."""
     splash = tk.Tk()
     splash.withdraw()
-    splash.title("mDNS Network Scanner")
+    splash.title(APP_TITLE)
     brand_icon = get_branding_icon()
     if brand_icon:
         try:
@@ -66,7 +85,7 @@ def show_startup_splash(message="Please wait, loading libraries..."):
 
     title = tk.Label(
         header,
-        text="mDNS Network Scanner",
+        text=APP_NAME,
         font=("Segoe UI", 15, "bold"),
         bg="#0F172A",
         fg="#F8FAFC",
@@ -74,9 +93,19 @@ def show_startup_splash(message="Please wait, loading libraries..."):
     )
     title.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
 
+    version = tk.Label(
+        header,
+        text=f"v{APP_VERSION}",
+        font=("Segoe UI", 10, "bold"),
+        bg="#0F172A",
+        fg="#7DD3FC",
+        anchor=tk.E,
+    )
+    version.pack(side=tk.RIGHT, padx=(0, 8))
+
     label = tk.Label(
         container,
-        text=message,
+        text=f"{message}\nVersion {APP_VERSION}",
         font=("Segoe UI", 10, "bold"),
         bg="#0F172A",
         fg="#E0F2FE",
@@ -999,6 +1028,40 @@ class TreeviewTooltip:
             self.tip_window = None
 
 
+class WidgetTooltip:
+    """Displays a small tooltip near a widget on hover."""
+    def __init__(self):
+        self.tip_window = None
+        self.active_widget = None
+
+    def show_tip(self, widget, text):
+        if not text or not widget.winfo_exists():
+            return
+
+        if self.tip_window and self.active_widget is widget:
+            return
+
+        self.hide_tip()
+        self.active_widget = widget
+        self.tip_window = tw = tk.Toplevel(widget)
+        tw.wm_overrideredirect(True)
+        x = widget.winfo_rootx() + widget.winfo_width() + 10
+        y = widget.winfo_rooty() + widget.winfo_height() + 8
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            tw, text=text, justify=tk.LEFT,
+            background="#FFFFE1", relief=tk.SOLID, borderwidth=1,
+            font=("Segoe UI", 8, "normal"), padx=4, pady=2
+        )
+        label.pack()
+
+    def hide_tip(self):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+            self.active_widget = None
+
+
 class NetworkScannerGUI:
     def __init__(self, root):
         self.root = root
@@ -1020,11 +1083,15 @@ class NetworkScannerGUI:
         # Bind double click for editing notes
         self.tree.bind("<Double-1>", self.on_double_click)
 
-        # --- ADD THESE THREE LINES ---
         self.tooltip = TreeviewTooltip(self.tree)
+        self.widget_tooltip = WidgetTooltip()
         self.tree.bind("<Motion>", self.on_tree_hover)
         self.tree.bind("<Button-3>", self.show_context_menu)
-        # -----------------------------
+
+    def bind_widget_tooltip(self, widget, text):
+        """Attach hover tooltip text to a widget."""
+        widget.bind("<Enter>", lambda event, tip=text: self.widget_tooltip.show_tip(widget, tip))
+        widget.bind("<Leave>", lambda event: self.widget_tooltip.hide_tip())
 
     def on_tree_hover(self, event):
         """Shows a hover tooltip on treeview rows."""
@@ -1069,9 +1136,89 @@ class NetworkScannerGUI:
         self.root.update()
         self.set_status(f"Copied to clipboard: '{text}'", status_type="ready")
 
+    def _copy_selected_example_text(self, event=None):
+        """Copies any selected text from the custom range examples widget."""
+        try:
+            self.custom_help.configure(state="normal")
+            selected = self.custom_help.get(tk.SEL_FIRST, tk.SEL_LAST)
+            if selected:
+                self.copy_to_clipboard(selected)
+            self.custom_help.configure(state="disabled")
+            return "break"
+        except tk.TclError:
+            self.custom_help.configure(state="disabled")
+            return "break"
+
+    def show_about_dialog(self):
+        """Displays the app version and release notes."""
+        about = tk.Toplevel(self.root)
+        about.title(f"About {APP_NAME}")
+        about.resizable(False, False)
+        about.transient(self.root)
+        about.grab_set()
+
+        container = tk.Frame(about, padx=20, pady=18, bg="#F8FAFC")
+        container.pack(fill=tk.BOTH, expand=True)
+
+        brand_icon = get_branding_icon()
+        if brand_icon:
+            icon = tk.Label(container, image=brand_icon, bg="#F8FAFC")
+            icon.pack(pady=(0, 8))
+            icon.image = brand_icon
+
+        title = tk.Label(container, text=APP_NAME, font=("Segoe UI", 15, "bold"), bg="#F8FAFC", fg="#0F172A")
+        title.pack()
+
+        version = tk.Label(container, text=f"Version {APP_VERSION}", font=("Segoe UI", 10, "bold"), bg="#F8FAFC", fg="#334155")
+        version.pack(pady=(4, 8))
+
+        credit = tk.Label(
+            container,
+            text=APP_CREDIT,
+            bg="#F8FAFC",
+            fg="#475569",
+            wraplength=380,
+            justify=tk.CENTER,
+            font=("Segoe UI", 9, "bold"),
+        )
+        credit.pack(pady=(0, 8))
+
+        summary = tk.Label(
+            container,
+            text=RELEASE_NOTES["summary"],
+            bg="#F8FAFC",
+            fg="#475569",
+            wraplength=380,
+            justify=tk.CENTER,
+        )
+        summary.pack(pady=(0, 8))
+
+        changes_frame = tk.Frame(container, bg="#F8FAFC")
+        changes_frame.pack(fill=tk.X)
+
+        tk.Label(changes_frame, text="Highlights:", bg="#F8FAFC", fg="#0F172A", font=("Segoe UI", 9, "bold"), justify=tk.LEFT, anchor=tk.W).pack(anchor=tk.W)
+        for item in RELEASE_NOTES["changes"]:
+            tk.Label(
+                changes_frame,
+                text=f"• {item}",
+                bg="#F8FAFC",
+                fg="#475569",
+                justify=tk.LEFT,
+                anchor=tk.W,
+                wraplength=360,
+            ).pack(anchor=tk.W, pady=1)
+
+        close_btn = ttk.Button(about, text="Close", command=about.destroy)
+        close_btn.pack(pady=(12, 0))
+
+        about.geometry("430x360")
+        about.minsize(430, 360)
+        about.update_idletasks()
+        about.focus_set()
+
     def apply_window_branding(self):
         """Applies the same title and icon used by the splash window."""
-        self.root.title("mDNS Network Scanner")
+        self.root.title(APP_TITLE)
         self.root.configure(bg="#F8FAFC")
         brand_icon = get_branding_icon()
         if brand_icon:
@@ -1109,13 +1256,32 @@ class NetworkScannerGUI:
 
         title_label = tk.Label(
             branding_bar,
-            text="mDNS Network Scanner",
+            text=APP_NAME,
             bg="#E2E8F0",
             fg="#0F172A",
             font=("Segoe UI", 13, "bold"),
             anchor=tk.W,
         )
         title_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        version_label = tk.Label(
+            branding_bar,
+            text=f"v{APP_VERSION}",
+            bg="#E2E8F0",
+            fg="#0F172A",
+            font=("Segoe UI", 10, "bold"),
+            anchor=tk.E,
+            padx=10,
+        )
+        version_label.pack(side=tk.RIGHT)
+
+        about_btn = ttk.Button(
+            branding_bar,
+            text="About",
+            command=self.show_about_dialog,
+            width=8,
+        )
+        about_btn.pack(side=tk.RIGHT, padx=(0, 10))
 
         # 1. Top Configuration Frame
         ctrl_frame = ttk.LabelFrame(self.root, text=" Network Selection & Configuration ", padding=8)
@@ -1125,7 +1291,7 @@ class NetworkScannerGUI:
         self.adapter_var = tk.StringVar()
         self.adapter_combo = ttk.Combobox(ctrl_frame, textvariable=self.adapter_var, width=50, state="readonly")
 
-        combo_values = []
+        combo_values = ["Select Interface / Subnet..."]
         for net in self.adapters:
             net_str = str(net['network'])
             ip_str = ", ".join(net['ips'])
@@ -1134,29 +1300,60 @@ class NetworkScannerGUI:
 
         combo_values.append("Custom IP / Range / CIDR...")
         self.adapter_combo['values'] = combo_values
-        if combo_values:
-            self.adapter_combo.current(0)
+        self.adapter_combo.current(0)
         self.adapter_combo.grid(row=0, column=1, sticky=tk.W, padx=5, pady=(2, 1))
         self.adapter_combo.bind("<<ComboboxSelected>>", self.on_adapter_select)
 
         ttk.Label(ctrl_frame, text="Custom Range:").grid(row=0, column=2, sticky=tk.W, padx=(12, 5), pady=(2, 1))
-        self.custom_entry = ttk.Entry(ctrl_frame, width=28, state="disabled")
+        self.custom_entry = tk.Entry(
+            ctrl_frame,
+            width=28,
+            state="disabled",
+            disabledbackground="#E2E8F0",
+            disabledforeground="#64748B",
+            bg="#E2E8F0",
+            fg="#64748B",
+            insertbackground="#64748B",
+        )
         self.custom_entry.grid(row=0, column=3, sticky=tk.W, padx=5, pady=(2, 1))
+        self.custom_help = tk.Text(
+            ctrl_frame,
+            height=2,
+            width=52,
+            bg="#F8FAFC",
+            fg="#475569",
+            wrap=tk.WORD,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            padx=0,
+            pady=0,
+            cursor="xterm",
+            exportselection=False,
+            state="normal",
+        )
+        self.custom_help.insert(tk.END, "Examples: 10.40.61.38-67 or 10.40.61.38-10.40.61.67 or 10.40.61.0/24")
+        self.custom_help.configure(state="disabled")
+        self.custom_help.bind("<Button-3>", self._copy_selected_example_text)
+        self.custom_help.bind("<Control-c>", self._copy_selected_example_text)
+        self.custom_help.bind("<Control-C>", self._copy_selected_example_text)
+        self.custom_help.grid(row=1, column=2, columnspan=2, sticky=tk.E, padx=(12, 0), pady=(0, 2))
 
-        ttk.Label(ctrl_frame, text="Discovery Mode:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=(2, 1))
+        ttk.Label(ctrl_frame, text="Discovery Mode:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=(2, 1))
         self.mode_var = tk.StringVar(value="thorough")
-        ttk.Radiobutton(ctrl_frame, text="Fast Scan (Ping + ARP + NetBIOS + Ports)", variable=self.mode_var, value="fast").grid(row=1, column=1, sticky=tk.W, padx=5, pady=(2, 1))
-        ttk.Radiobutton(ctrl_frame, text="Thorough Scan (Fast + Full mDNS)", variable=self.mode_var, value="thorough").grid(row=1, column=2, columnspan=2, sticky=tk.W, padx=(12, 5), pady=(2, 1))
+        ttk.Radiobutton(ctrl_frame, text="Fast Scan (Ping + ARP + NetBIOS + Ports)", variable=self.mode_var, value="fast").grid(row=2, column=1, sticky=tk.W, padx=5, pady=(2, 1))
+        ttk.Radiobutton(ctrl_frame, text="Thorough Scan (Fast + Full mDNS)", variable=self.mode_var, value="thorough").grid(row=2, column=2, columnspan=2, sticky=tk.W, padx=(12, 5), pady=(2, 1))
 
         # Action Buttons Box
         btn_box = ttk.Frame(ctrl_frame)
-        btn_box.grid(row=0, column=4, rowspan=2, padx=10, pady=2, sticky="NSEW")
+        btn_box.grid(row=0, column=4, rowspan=3, padx=(10, 0), pady=2, sticky="NW")
 
         self.scan_btn = ttk.Button(btn_box, text="Start Scan", style="ScanPrimary.TButton", command=lambda: self.start_scan_thread(preserve_existing=False), width=12)
         self.scan_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
 
         self.rescan_btn = ttk.Button(btn_box, text="Rescan", style="RescanOrange.TButton", command=lambda: self.start_scan_thread(preserve_existing=True), width=12, state="disabled")
         self.rescan_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
+        self.bind_widget_tooltip(self.rescan_btn, "Newly found devices are highlighted in green.")
 
         self.stop_btn = ttk.Button(btn_box, text="Stop Scan", style="StopRed.TButton", command=self.stop_scan, state="disabled", width=12)
         self.stop_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
@@ -1189,6 +1386,7 @@ class NetworkScannerGUI:
 
         clear_filter_btn = ttk.Button(search_panel, text="Clear", command=self.clear_filter, width=8)
         clear_filter_btn.pack(side=tk.LEFT, padx=5)
+        self.bind_widget_tooltip(clear_filter_btn, "Clears the query and resets the column sort order.")
 
         # Right half: Export controls
         export_panel = ttk.Frame(filter_frame)
@@ -1275,11 +1473,17 @@ class NetworkScannerGUI:
         self.root.after(0, update)
 
     def on_adapter_select(self, event):
-        if self.adapter_combo.get() == "Custom IP / Range / CIDR...":
+        selected = self.adapter_combo.get()
+        if selected == "Custom IP / Range / CIDR...":
             self.custom_entry.config(state="normal")
             self.custom_entry.focus()
+            self.custom_entry.configure(fg="#111827", bg="#FFFFFF")
+        elif selected in ("", "Select Interface / Subnet..."):
+            self.custom_entry.config(state="disabled")
+            self.custom_entry.configure(fg="#64748B", bg="#E2E8F0")
         else:
             self.custom_entry.config(state="disabled")
+            self.custom_entry.configure(fg="#64748B", bg="#E2E8F0")
 
     def update_action_button_states(self):
         self.scan_btn.config(state="disabled" if self.is_scan_running else "normal")
@@ -1358,19 +1562,25 @@ class NetworkScannerGUI:
 
     def start_scan_thread(self, preserve_existing=False):
         selected = self.adapter_combo.get()
-        if not selected:
-            messagebox.showwarning("Selection Warning", "Please select a network interface or custom range.")
+        if not selected or selected == "Select Interface / Subnet...":
+            messagebox.showwarning("Selection Warning", "Please select a network interface or choose Custom IP / Range / CIDR.")
             return
 
         try:
             if selected == "Custom IP / Range / CIDR...":
                 raw_input = self.custom_entry.get().strip()
                 if not raw_input:
-                    messagebox.showwarning("Input Error", "Please specify a target IP, range, or CIDR block.")
+                    messagebox.showwarning(
+                        "Input Error",
+                        "Please specify a custom target. Examples:\n• 10.40.61.38-67\n• 10.40.61.38-10.40.61.67\n• 10.40.61.0/24",
+                    )
                     return
                 hosts = parse_custom_range(raw_input)
             else:
-                idx = self.adapter_combo.current()
+                idx = self.adapter_combo.current() - 1
+                if idx < 0:
+                    messagebox.showwarning("Selection Warning", "Please select a valid network interface or custom range.")
+                    return
                 hosts = list(self.adapters[idx]['network'].hosts())
         except Exception as e:
             messagebox.showerror("Parsing Error", f"Failed to parse target network range: {e}")
@@ -1484,9 +1694,9 @@ class NetworkScannerGUI:
 
         self.apply_filter()
         if not results and not self.cancel_event.is_set():
-            self.set_status("Scan completed. No active hosts discovered on subnet.", status_type="ready")
+            self.set_status("Scan completed. No active hosts discovered on subnet. Newly found devices are highlighted in green.", status_type="ready")
         elif results:
-            self.set_status(f"Scan completed successfully. Discovered {len(results)} active host(s).", status_type="ready")
+            self.set_status(f"Scan completed successfully. Discovered {len(results)} active host(s). Newly found devices are highlighted in green.", status_type="ready")
 
     # ============================================================
     # Live Search & Filter Logic
