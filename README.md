@@ -1,10 +1,14 @@
-# mDNS Network Scanner
+# NetScanNotebook
 
-![mDNS Network Scanner](Screenshot-v1.0.0.png)
+![NetScanNotebook](Screenshot-v1.0.0.png)
+
+Originally released as mDNS Network Scanner. Rebranded to NetScanNotebook to better reflect its focus on local discovery, device inventory, and persistent notes.
 
 Fast, Windows-native network discovery for people who want a clean view of what is actually on their local network.
 
-mDNS Network Scanner finds active devices, resolves host metadata, audits common ports, and keeps per-device notes tied to the real MAC address so they remain useful across IP changes. It is built for subnet scans, custom ranges, and fast rescan workflows.
+NetScanNotebook identifies active devices, resolves host metadata, audits common ports, and keeps per-device notes tied to the real MAC address so they remain useful across IP changes. It is built for subnet scans, custom ranges, and fast rescan workflows.
+
+This is the part that sets it apart: unlike many network scanners that only list devices, NetScanNotebook lets you attach notes to each device and keep that context even as IP addresses change.
 
 ## Features
 
