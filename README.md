@@ -1,5 +1,7 @@
 # NetScanNotebook
 
+[![Download Latest Release](https://img.shields.io/github/v/release/SOSTRAX/NetScanNotebook?style=for-the-badge&logo=github&color=2ea44f&label=Download%20.exe)](https://github.com/SOSTRAX/NetScanNotebook/releases/latest)
+
 ![NetScanNotebook](Screenshot-v1.0.0.png)
 
 Originally released as mDNS Network Scanner. Rebranded to NetScanNotebook to better reflect its focus on local discovery, device inventory, and persistent notes.
