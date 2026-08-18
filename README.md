@@ -4,6 +4,16 @@
 
 ![NetScanNotebook](Screenshot-v1.0.0.png)
 
+
+## 🚀 Quick Download
+
+| Platform | File | Link |
+| :--- | :--- | :--- |
+| **Windows** | Portable Executable (`.exe`) | [📥 Download Latest Version](https://github.com/SOSTRAX/NetScanNotebook/releases/latest) |
+
+> 💡 **Tip:** Check out all releases and source assets on the [Releases Page](https://github.com/SOSTRAX/NetScanNotebook/releases).
+
+
 Originally released as mDNS Network Scanner. Rebranded to NetScanNotebook to better reflect its focus on local discovery, device inventory, and persistent notes.
 
 Fast, Windows-native network discovery for people who want a clean view of what is actually on their local network.
