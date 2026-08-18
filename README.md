@@ -1,28 +1,25 @@
 # mDNS Network Scanner
 
-mDNS Network Scanner is a Windows network discovery and device inventory tool for scanning active interfaces, IPv4 subnets, and custom range targets. It identifies responding hosts, resolves MAC addresses and vendor data, detects hostnames, audits common TCP ports, and saves custom notes tied to the device's MAC address so they persist and reload automatically across scans.
+![mDNS Network Scanner](Screenshot-v1.0.0.png)
 
-## What it does
+Fast, Windows-native network discovery for people who want a clean view of what is actually on their local network.
 
-- Detects active local IPv4 networks and available Windows adapters
-- Scans a selected subnet, interface range, or custom target list
-- Supports scoped targets like:
-  - 192.168.1.0/24
-  - 10.40.61.38-67
-  - 10.40.61.38-10.40.61.67
-  - 10.40.61.66
-- Performs ICMP ping sweeps and Windows ARP probing
-- Resolves hostnames and NetBIOS names when available
-- Looks up vendor names using the device MAC address
-- Audits common TCP ports for discovered devices
-- Highlights newly found devices in green on rescan
-- Saves per-device notes keyed to the MAC address so notes remain associated even when an IP address changes
-- Supports sorting and filtering within the results grid
-- Exports results to Excel or CSV
+mDNS Network Scanner finds active devices, resolves host metadata, audits common ports, and keeps per-device notes tied to the real MAC address so they remain useful across IP changes. It is built for subnet scans, custom ranges, and fast rescan workflows.
 
-## Supported scan input formats
+## Features
 
-The scanner accepts the following range formats:
+- Active interface and subnet discovery
+- Custom IP / range / CIDR scanning
+- ICMP ping sweeps and Windows ARP probing
+- Hostname and NetBIOS resolution
+- MAC-based vendor lookup
+- Common port auditing
+- Green-highlighted new discoveries on rescan
+- Persistent per-device notes keyed by MAC address
+- Sortable, filterable results grid
+- Excel / CSV export
+
+## Supported targets
 
 ```text
 192.168.1.0/24
@@ -31,24 +28,29 @@ The scanner accepts the following range formats:
 10.40.61.66
 ```
 
-## Notes and behavior
+## Why it exists
 
-- The app is designed for Windows environments and uses native Windows networking utilities where available.
-- Device notes are stored in a local JSON mapping file and are associated by MAC address, which helps keep notes tied to the device rather than only the IP.
-- On rescans, newly discovered devices are highlighted in green to make changes easier to spot.
-- The Clear action resets the query and column sort order.
+This tool is designed for quick local network visibility and organized device tracking across repeated scans. Whether you are validating a subnet, auditing a lab environment, or documenting devices across a changing IP layout, the scanner keeps the results readable and actionable.
+
+## Notes
+
+- Built for Windows environments
+- Device notes are saved locally and associated by MAC address, not just IP, which helps preserve context as addresses change
+- The Clear action resets the active query and sort state
+- Newly discovered devices are highlighted in green during rescans
 
 ## Requirements
 
-Python 3.10+ on Windows.
+- Python 3.10+
+- Windows
 
-Install dependencies:
+The app will automatically install missing required Python packages the first time it starts if they are not already available. Manual installation is optional but can be useful for a standard local setup.
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-## Running
+## Run it
 
 ```powershell
 python .\mDNS-NetworkScanner-GUI.py
@@ -64,7 +66,7 @@ This project is distributed under a custom SOSTRAX Shared Source License. Commer
 
 ## Attribution
 
-Designed by Michael Dietz
-SOSTRAX
+Designed by Michael Dietz  
+SOSTRAX  
 mike@sostrax.com
 
